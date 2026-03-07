@@ -1,6 +1,6 @@
 {
   "name": "opencode-llm-usage",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "OpenCode plugin — LLM subscription limits + API spend tracking via llm-usage-tracker backend",
   "type": "module",
   "main": "src/index.ts",

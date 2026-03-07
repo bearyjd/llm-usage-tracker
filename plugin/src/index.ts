@@ -40,12 +40,13 @@ interface OpencodeClient {
   }
 }
 
-export const LLMUsagePlugin: Plugin = async ({ client }) => {
+export const LLMUsagePlugin: Plugin = async ({ client, $ }) => {
   const typedClient = client as unknown as OpencodeClient
   const config: PluginConfig = loadConfig()
   const tracker = new TrackerClient(config.backendUrl, config.timeoutMs)
 
   let lastToastAt = 0
+  let backendStarted = false
 
   async function log(level: "debug" | "info" | "warn" | "error", message: string, extra?: Record<string, unknown>): Promise<void> {
     try {
@@ -94,6 +95,7 @@ export const LLMUsagePlugin: Plugin = async ({ client }) => {
     if (isThrottled()) return
 
     try {
+      await ensureBackend()
       const snapshots = await tracker.status()
       if (snapshots.length === 0) return
       const message = formatToast(snapshots)
@@ -109,15 +111,32 @@ export const LLMUsagePlugin: Plugin = async ({ client }) => {
     }
   }
 
-  // Verify backend connectivity on init (non-blocking)
-  void (async () => {
-    const alive = await tracker.isAlive()
-    if (alive) {
-      await log("info", "Plugin initialized, backend reachable", { url: config.backendUrl })
-    } else {
-      await log("warn", "Backend not reachable — run: llm-tracker serve", { url: config.backendUrl })
+  async function ensureBackend(): Promise<boolean> {
+    if (await tracker.isAlive()) return true
+    if (backendStarted) return false
+
+    backendStarted = true
+    await log("info", "Backend not reachable, attempting auto-start")
+    try {
+      $`llm-tracker serve &`.quiet()
+      // Give it a moment to bind the port
+      await new Promise((r) => setTimeout(r, 2000))
+      const alive = await tracker.isAlive()
+      if (alive) {
+        await log("info", "Backend auto-started successfully", { url: config.backendUrl })
+      } else {
+        await log("warn", "Backend started but not responding yet", { url: config.backendUrl })
+      }
+      return alive
+    } catch (err) {
+      await log("warn", "Failed to auto-start backend", {
+        error: err instanceof Error ? err.message : String(err),
+      })
+      return false
     }
-  })()
+  }
+
+  void ensureBackend()
 
   return {
     event: async ({ event }) => {
