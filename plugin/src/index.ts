@@ -4,6 +4,7 @@ import { TrackerClient } from "./lib/client"
 import { loadConfig, type PluginConfig } from "./lib/config"
 import {
   formatToast,
+  formatInline,
   formatUsageReport,
   formatSpendReport,
   formatRecommendations,
@@ -141,7 +142,25 @@ export const LLMUsagePlugin: Plugin = async ({ client, $ }) => {
   return {
     event: async ({ event }) => {
       if (event.type === "session.idle" && config.showOnIdle) {
-        await showUsageToast("session.idle")
+        const sessionID = (event as { properties?: { sessionID?: string } }).properties?.sessionID
+        if (sessionID && !isThrottled()) {
+          try {
+            await ensureBackend()
+            const snapshots = await tracker.status()
+            if (snapshots.length === 0) return
+            const inline = formatInline(snapshots)
+            if (inline) {
+              await typedClient.session.prompt({
+                path: { id: sessionID },
+                body: {
+                  noReply: true,
+                  parts: [{ type: "text", text: inline }],
+                },
+              })
+            }
+          } catch {
+          }
+        }
       }
       if (event.type === "session.compacted" && config.showOnCompact) {
         await showUsageToast("session.compacted")

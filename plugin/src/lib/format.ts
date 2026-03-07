@@ -52,6 +52,33 @@ function providerName(p: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Inline format (single line — injected after AI response, zero token cost)
+// ---------------------------------------------------------------------------
+
+export function formatInline(snapshots: Snapshot[]): string {
+  const sub = snapshots.filter((s) => s.source === "subscription")
+  const api = snapshots.filter((s) => s.source === "api")
+
+  const parts: string[] = []
+
+  for (const s of sub) {
+    if (s.messages_used !== null && s.messages_limit !== null) {
+      const p = pct(s.messages_used, s.messages_limit)
+      const remaining = s.messages_limit - s.messages_used
+      const reset = fmtMinutes(s.messages_reset_at)
+      parts.push(`${statusIcon(p)} ${providerName(s.provider)}: ${remaining}/${s.messages_limit} left (${reset})`)
+    }
+  }
+
+  const totalSpend = api.reduce((sum, s) => sum + (s.api_spend_usd ?? 0), 0)
+  if (totalSpend > 0) {
+    parts.push(`API: ${fmtSpend(totalSpend)}`)
+  }
+
+  return parts.length > 0 ? parts.join(" | ") : ""
+}
+
+// ---------------------------------------------------------------------------
 // Toast format (compact — shown as notification)
 // ---------------------------------------------------------------------------
 
@@ -121,19 +148,32 @@ export function formatUsageReport(snapshots: Snapshot[]): string {
 
   // API spend table
   if (api.length > 0) {
+    const hasOutputTokens = api.some((s) => s.tokens_output !== null && s.tokens_output > 0)
     lines.push("API Spend (this month):")
-    lines.push("Provider     Spend       In Tokens    Out Tokens")
-    lines.push("-".repeat(55))
-    for (const s of api.sort((a, b) => a.provider.localeCompare(b.provider))) {
-      const name = providerName(s.provider).padEnd(12)
-      const spend = fmtSpend(s.api_spend_usd).padStart(10)
-      const tokIn = fmtTokens(s.tokens_input).padStart(12)
-      const tokOut = fmtTokens(s.tokens_output).padStart(13)
-      lines.push(`${name} ${spend}  ${tokIn}  ${tokOut}`)
+    if (hasOutputTokens) {
+      lines.push("Provider     Spend       In Tokens    Out Tokens")
+      lines.push("-".repeat(55))
+      for (const s of api.sort((a, b) => a.provider.localeCompare(b.provider))) {
+        const name = providerName(s.provider).padEnd(12)
+        const spend = fmtSpend(s.api_spend_usd).padStart(10)
+        const tokIn = fmtTokens(s.tokens_input).padStart(12)
+        const tokOut = fmtTokens(s.tokens_output).padStart(13)
+        lines.push(`${name} ${spend}  ${tokIn}  ${tokOut}`)
+      }
+    } else {
+      lines.push("Provider     Spend         Tokens")
+      lines.push("-".repeat(42))
+      for (const s of api.sort((a, b) => a.provider.localeCompare(b.provider))) {
+        const name = providerName(s.provider).padEnd(12)
+        const spend = fmtSpend(s.api_spend_usd).padStart(10)
+        const tok = fmtTokens(s.tokens_input).padStart(14)
+        lines.push(`${name} ${spend}  ${tok}`)
+      }
     }
     const total = api.reduce((sum, s) => sum + (s.api_spend_usd ?? 0), 0)
-    lines.push("-".repeat(55))
-    lines.push(`${"Total".padEnd(12)} ${fmtSpend(total).padStart(10)}`)
+    const totalTok = api.reduce((sum, s) => sum + (s.tokens_input ?? 0) + (s.tokens_output ?? 0), 0)
+    lines.push("-".repeat(hasOutputTokens ? 55 : 42))
+    lines.push(`${"Total".padEnd(12)} ${fmtSpend(total).padStart(10)}  ${fmtTokens(totalTok).padStart(hasOutputTokens ? 12 : 14)}`)
     lines.push("")
   }
 
@@ -150,16 +190,22 @@ export function formatSpendReport(spend: SpendSummary): string {
     return "No API spend data. Is LiteLLM configured?"
   }
 
+  const hasOutputTokens = entries.some(([, d]) => d.tokens_output !== null && d.tokens_output > 0)
   const lines: string[] = ["API Spend Summary (30 days)", ""]
-  lines.push("Provider     Spend       In Tokens    Out Tokens   Period     Last Updated")
-  lines.push("-".repeat(80))
+
+  if (hasOutputTokens) {
+    lines.push("Provider     Spend       In Tokens    Out Tokens   Period     Last Updated")
+    lines.push("-".repeat(80))
+  } else {
+    lines.push("Provider     Spend         Tokens   Period     Last Updated")
+    lines.push("-".repeat(68))
+  }
 
   let totalSpend = 0
+  let totalTok = 0
   for (const [provider, data] of entries.sort(([a], [b]) => a.localeCompare(b))) {
     const name = providerName(provider).padEnd(12)
-    const spend = fmtSpend(data.spend_usd).padStart(10)
-    const tokIn = fmtTokens(data.tokens_input).padStart(12)
-    const tokOut = fmtTokens(data.tokens_output).padStart(13)
+    const spendStr = fmtSpend(data.spend_usd).padStart(10)
     const period = (data.period ?? "?").padStart(9)
     const updated = data.collected_at
       ? new Date(data.collected_at).toLocaleString("en-US", {
@@ -169,12 +215,21 @@ export function formatSpendReport(spend: SpendSummary): string {
           minute: "2-digit",
         })
       : "?"
-    lines.push(`${name} ${spend}  ${tokIn}  ${tokOut}  ${period}   ${updated}`)
+    if (hasOutputTokens) {
+      const tokIn = fmtTokens(data.tokens_input).padStart(12)
+      const tokOut = fmtTokens(data.tokens_output).padStart(13)
+      lines.push(`${name} ${spendStr}  ${tokIn}  ${tokOut}  ${period}   ${updated}`)
+    } else {
+      const tok = fmtTokens(data.tokens_input).padStart(14)
+      lines.push(`${name} ${spendStr}  ${tok}  ${period}   ${updated}`)
+    }
     totalSpend += data.spend_usd ?? 0
+    totalTok += (data.tokens_input ?? 0) + (data.tokens_output ?? 0)
   }
 
-  lines.push("-".repeat(80))
-  lines.push(`${"Total".padEnd(12)} ${fmtSpend(totalSpend).padStart(10)}`)
+  const width = hasOutputTokens ? 80 : 68
+  lines.push("-".repeat(width))
+  lines.push(`${"Total".padEnd(12)} ${fmtSpend(totalSpend).padStart(10)}  ${fmtTokens(totalTok).padStart(hasOutputTokens ? 12 : 14)}`)
   lines.push("")
 
   return lines.join("\n")
