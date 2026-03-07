@@ -9,6 +9,7 @@ description = "Tracks usage limits across Claude, ChatGPT, and Gemini subscripti
 requires-python = ">=3.12"
 dependencies = [
     "playwright>=1.44.0",
+    "playwright-stealth>=2.0.0",
     "sqlalchemy>=2.0.0",
     "aiosqlite>=0.19.0",
     "typer>=0.12.0",

@@ -4,6 +4,7 @@
 
 # Auth sessions (contain sensitive browser cookies)
 auth/sessions/*.json
+auth/browser_profiles/
 
 # Database
 data/
