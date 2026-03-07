@@ -52,7 +52,7 @@ export class TrackerClient {
   private baseUrl: string
   private timeoutMs: number
 
-  constructor(baseUrl: string = "http://127.0.0.1:8080", timeoutMs: number = 5000) {
+  constructor(baseUrl: string = "http://127.0.0.1:48372", timeoutMs: number = 5000) {
     this.baseUrl = baseUrl.replace(/\/+$/, "")
     this.timeoutMs = timeoutMs
   }

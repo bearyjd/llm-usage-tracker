@@ -1,5 +1,5 @@
 export interface PluginConfig {
-  /** Backend URL (default: http://127.0.0.1:8080) */
+  /** Backend URL (default: http://127.0.0.1:48372) */
   backendUrl: string
   /** Show toast on session.idle (default: true) */
   showOnIdle: boolean
@@ -14,7 +14,7 @@ export interface PluginConfig {
 }
 
 const DEFAULT_CONFIG: PluginConfig = {
-  backendUrl: "http://127.0.0.1:8080",
+  backendUrl: "http://127.0.0.1:48372",
   showOnIdle: true,
   showOnCompact: true,
   toastDurationMs: 8000,

@@ -227,6 +227,6 @@ async def trigger_collection(
         from backend.collection import collect_all
         await collect_all(targets)
 
-    background_tasks.add_task(asyncio.create_task, _run())
+    background_tasks.add_task(_run)
 
     return CollectResult(triggered_at=datetime.utcnow(), providers=targets)

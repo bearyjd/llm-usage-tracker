@@ -409,7 +409,7 @@ def daemon(
 @app.command()
 def serve(
     host: Annotated[str, typer.Option("--host", help="Bind host")] = "127.0.0.1",
-    port: Annotated[int, typer.Option("--port", help="Bind port")] = 8080,
+    port: Annotated[int, typer.Option("--port", help="Bind port")] = 48372,
     reload: Annotated[bool, typer.Option("--reload", help="Auto-reload on code changes")] = False,
 ):
     """Start the FastAPI server (REST API + future web UI)."""
