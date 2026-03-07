@@ -33,21 +33,34 @@ LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL", "").rstrip("/")
 LITELLM_API_KEY = os.getenv("LITELLM_API_KEY", "")
 
 # Model-name prefix → provider
+# Patterns applied to the *canonical* model name (after stripping LiteLLM routing prefixes).
+# Order matters: more-specific patterns first (claude before openai, since LiteLLM may
+# route Claude models as "openai/claude-*").
 _PROVIDER_PATTERNS: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"^(claude|anthropic)", re.I), "claude"),
-    (re.compile(r"^(gpt-|o1|o3|o4|openai|chatgpt)", re.I), "chatgpt"),
+    (re.compile(r"(claude|anthropic)", re.I), "claude"),
+    (re.compile(r"^(gpt-|o[134]-|openai|chatgpt)", re.I), "chatgpt"),
     (re.compile(r"^(gemini|google|palm)", re.I), "gemini"),
     (re.compile(r"^(groq/|groq-)", re.I), "groq"),
-    # LiteLLM passes Groq models as "groq/llama-3.1-8b-instant" etc.
-    # Also catch bare model names that are Groq-hosted
-    (re.compile(r"^(llama|mixtral|gemma|whisper).*groq", re.I), "groq"),
+    (re.compile(r"^(llama|mixtral|gemma|whisper)", re.I), "groq"),
 ]
+
+# LiteLLM routing prefixes to strip before matching (e.g. "openai/claude-opus" → "claude-opus")
+_ROUTING_PREFIXES = re.compile(r"^(openai|anthropic|google|groq|azure|bedrock|vertex_ai)/", re.I)
 
 
 def _model_to_provider(model: str) -> str | None:
+    # First try matching the full model name (catches "claude-*", "gemini/*", "groq/*")
     for pattern, provider in _PROVIDER_PATTERNS:
-        if pattern.match(model):
+        if pattern.search(model):
             return provider
+
+    # Strip routing prefix and try again (e.g. "openai/gpt-4o" → "gpt-4o")
+    stripped = _ROUTING_PREFIXES.sub("", model)
+    if stripped != model:
+        for pattern, provider in _PROVIDER_PATTERNS:
+            if pattern.search(stripped):
+                return provider
+
     return None
 
 
@@ -102,9 +115,6 @@ class LiteLLMCollector:
         }
 
     async def collect_all(self) -> list[UsageSnapshot]:
-        """
-        Fetch LiteLLM spend data and return one snapshot per provider.
-        """
         if not is_configured():
             raise CollectionError(
                 "LiteLLM not configured. Set LITELLM_BASE_URL and LITELLM_API_KEY in .env"
@@ -116,12 +126,7 @@ class LiteLLMCollector:
 
         async with httpx.AsyncClient(timeout=20, verify=True) as client:
             spend_by_model = await self._fetch_model_spend(client, start, end)
-
-        if not spend_by_model:
-            raise CollectionError(
-                "LiteLLM returned no spend data. "
-                "Check LITELLM_API_KEY has access to /global/spend/models"
-            )
+            activity_by_model = await self._fetch_model_activity(client, start, end)
 
         # Aggregate by provider
         aggregated: dict[str, ProviderSpend] = {}
@@ -137,21 +142,46 @@ class LiteLLMCollector:
                 models=existing.models + [model],
             )
 
+        # Merge token data from /global/activity/model (has total_tokens per model group)
+        activity_tokens: dict[str, int] = {}
+        for model_group, total_tokens in activity_by_model.items():
+            provider = _model_to_provider(model_group)
+            if provider:
+                activity_tokens[provider] = activity_tokens.get(provider, 0) + total_tokens
+
+        # Build snapshots — also create entries for providers that only appear in activity
+        all_providers = set(aggregated.keys()) | set(activity_tokens.keys())
         snapshots = []
-        for provider, agg in aggregated.items():
+        for provider in all_providers:
             snapshot = self._base_snapshot(provider)
-            snapshot.api_spend_usd = round(agg.spend_usd, 6)
+            agg = aggregated.get(provider)
+
+            if agg:
+                snapshot.api_spend_usd = round(agg.spend_usd, 6)
+                snapshot.tokens_input = agg.tokens_input if agg.tokens_input else None
+                snapshot.tokens_output = agg.tokens_output if agg.tokens_output else None
+                snapshot.features = {"models_used": agg.models}
+                snapshot.raw = {
+                    "source": "litellm",
+                    "base_url": self._base,
+                    "period": f"{start}/{end}",
+                    "models": {m: spend_by_model[m] for m in agg.models},
+                }
+            else:
+                snapshot.api_spend_usd = 0.0
+                snapshot.raw = {"source": "litellm", "base_url": self._base}
+
             snapshot.api_spend_period = "monthly"
-            snapshot.tokens_input = agg.tokens_input
-            snapshot.tokens_output = agg.tokens_output
             snapshot.tokens_period = "monthly"
-            snapshot.features = {"models_used": agg.models}
-            snapshot.raw = {
-                "source": "litellm",
-                "base_url": self._base,
-                "period": f"{start}/{end}",
-                "models": {m: spend_by_model[m] for m in agg.models},
-            }
+
+            # Use activity endpoint tokens when spend endpoint has none
+            if provider in activity_tokens:
+                total = activity_tokens[provider]
+                if not snapshot.tokens_input and not snapshot.tokens_output:
+                    snapshot.tokens_input = total
+                    snapshot.tokens_output = 0
+                snapshot.raw["activity_total_tokens"] = total
+
             snapshots.append(snapshot)
 
         return snapshots
@@ -202,6 +232,40 @@ class LiteLLMCollector:
             "Check LITELLM_BASE_URL and that your key has spend read access."
         )
 
+    async def _fetch_model_activity(
+        self, client: httpx.AsyncClient, start: str, end: str
+    ) -> dict[str, int]:
+        """
+        GET /global/activity/model → {model_group: total_tokens}.
+        Returns empty dict on failure (non-critical — tokens are supplemental).
+        """
+        try:
+            resp = await client.get(
+                f"{self._base}/global/activity/model",
+                headers=self._headers,
+                params={"start_date": start, "end_date": end},
+            )
+            if not resp.is_success:
+                return {}
+            data = resp.json()
+            if not isinstance(data, list):
+                return {}
+            result: dict[str, int] = {}
+            for entry in data:
+                model = entry.get("model") or entry.get("model_group", "")
+                if not model:
+                    continue
+                total = 0
+                for day in entry.get("daily_data", []):
+                    total += int(day.get("total_tokens", 0))
+                if entry.get("sum_total_tokens"):
+                    total = max(total, int(entry["sum_total_tokens"]))
+                if total > 0:
+                    result[model] = total
+            return result
+        except Exception:
+            return {}
+
     def _parse_model_spend(self, data) -> dict[str, dict]:
         """
         Parse /global/spend/models response.
@@ -215,7 +279,11 @@ class LiteLLMCollector:
                 if not model:
                     continue
                 result[model] = {
-                    "spend": float(item.get("spend", 0) or item.get("total_cost", 0)),
+                    "spend": float(
+                        item.get("spend", 0)
+                        or item.get("total_spend", 0)
+                        or item.get("total_cost", 0)
+                    ),
                     "prompt_tokens": int(item.get("prompt_tokens", 0) or item.get("input_tokens", 0)),
                     "completion_tokens": int(item.get("completion_tokens", 0) or item.get("output_tokens", 0)),
                     "total_tokens": int(item.get("total_tokens", 0)),
@@ -225,7 +293,11 @@ class LiteLLMCollector:
             for model, info in data.items():
                 if isinstance(info, dict):
                     result[model] = {
-                        "spend": float(info.get("spend", 0) or info.get("total_cost", 0)),
+                        "spend": float(
+                            info.get("spend", 0)
+                            or info.get("total_spend", 0)
+                            or info.get("total_cost", 0)
+                        ),
                         "prompt_tokens": int(info.get("prompt_tokens", 0)),
                         "completion_tokens": int(info.get("completion_tokens", 0)),
                         "total_tokens": int(info.get("total_tokens", 0)),
