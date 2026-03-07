@@ -1,0 +1,34 @@
+# Environment
+.env
+*.env.local
+
+# Auth sessions (contain sensitive browser cookies)
+auth/sessions/*.json
+
+# Database
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+*.egg
+
+# Playwright browsers (installed separately)
+.playwright/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Plugin (TypeScript)
+plugin/node_modules/
+plugin/dist/
