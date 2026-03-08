@@ -10,15 +10,6 @@ import {
 } from "./lib/format"
 
 interface OpencodeClient {
-  session: {
-    prompt: (params: {
-      path: { id: string }
-      body: {
-        noReply?: boolean
-        parts: Array<{ type: "text"; text: string; ignored?: boolean }>
-      }
-    }) => Promise<unknown>
-  }
   tui: {
     showToast: (params: {
       body: {
@@ -56,26 +47,10 @@ export const LLMUsagePlugin: Plugin = async ({ client, $ }) => {
     }
   }
 
-  async function injectOutput(sessionID: string, text: string): Promise<void> {
-    try {
-      await typedClient.session.prompt({
-        path: { id: sessionID },
-        body: {
-          noReply: true,
-          parts: [{ type: "text", text, ignored: true }],
-        },
-      })
-    } catch (err) {
-      await log("warn", "Failed to inject output", {
-        error: err instanceof Error ? err.message : String(err),
-      })
-    }
-  }
-
-  async function showToast(message: string, variant: "info" | "warning" | "error" = "info"): Promise<void> {
+  async function showToast(message: string, variant: "info" | "warning" | "error" = "info", duration?: number): Promise<void> {
     try {
       await typedClient.tui.showToast({
-        body: { message, variant, duration: config.toastDurationMs },
+        body: { message, variant, duration: duration ?? config.toastDurationMs },
       })
     } catch (err) {
       await log("warn", "Failed to show toast", {
@@ -170,15 +145,15 @@ export const LLMUsagePlugin: Plugin = async ({ client, $ }) => {
     },
 
     "command.execute.before": async (input) => {
-      const { command, sessionID } = input as { command: string; sessionID: string }
+      const { command } = input as { command: string; sessionID: string }
 
       if (command === "usage") {
         try {
           const snapshots = await tracker.status()
-          const report = formatUsageReport(snapshots)
-          await injectOutput(sessionID, report)
+          const message = formatToast(snapshots)
+          await showToast(message, "info", 15000)
         } catch (err) {
-          await injectOutput(sessionID, backendDownMessage(err))
+          await showToast(backendDownMessage(err), "error")
         }
         return
       }
@@ -186,10 +161,17 @@ export const LLMUsagePlugin: Plugin = async ({ client, $ }) => {
       if (command === "spend") {
         try {
           const spend = await tracker.spendSummary()
-          const report = formatSpendReport(spend)
-          await injectOutput(sessionID, report)
+          const parts: string[] = ["API Spend (30d):"]
+          for (const [provider, data] of Object.entries(spend).sort(([a], [b]) => a.localeCompare(b))) {
+            const name = provider.charAt(0).toUpperCase() + provider.slice(1)
+            const usd = data.spend_usd !== null ? `$${data.spend_usd.toFixed(2)}` : "?"
+            parts.push(`${name}: ${usd}`)
+          }
+          const total = Object.values(spend).reduce((s, d) => s + (d.spend_usd ?? 0), 0)
+          parts.push(`Total: $${total.toFixed(2)}`)
+          await showToast(parts.join(" | "), "info", 15000)
         } catch (err) {
-          await injectOutput(sessionID, backendDownMessage(err))
+          await showToast(backendDownMessage(err), "error")
         }
         return
       }
@@ -197,10 +179,15 @@ export const LLMUsagePlugin: Plugin = async ({ client, $ }) => {
       if (command === "recommend") {
         try {
           const recs = await tracker.recommend()
-          const report = formatRecommendations(recs)
-          await injectOutput(sessionID, report)
+          if (recs.length === 0) {
+            await showToast("No recommendations. Run: llm-tracker status", "warning")
+          } else {
+            const icons: Record<string, string> = { use: "\u2713", warn: "\u26a0", avoid: "\u2717", wait: "\u231b", unknown: "?" }
+            const parts = recs.map((r) => `${icons[r.action] ?? ">"} ${r.message}`)
+            await showToast(parts.join(" | "), "info", 15000)
+          }
         } catch (err) {
-          await injectOutput(sessionID, backendDownMessage(err))
+          await showToast(backendDownMessage(err), "error")
         }
         return
       }
@@ -210,7 +197,7 @@ export const LLMUsagePlugin: Plugin = async ({ client, $ }) => {
           await tracker.triggerCollect()
           await showToast("Collection triggered. Data will refresh shortly.", "info")
         } catch (err) {
-          await injectOutput(sessionID, backendDownMessage(err))
+          await showToast(backendDownMessage(err), "error")
         }
         return
       }
@@ -248,15 +235,5 @@ export const LLMUsagePlugin: Plugin = async ({ client, $ }) => {
 
 function backendDownMessage(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err)
-  return [
-    "LLM Usage Tracker backend not reachable.",
-    "",
-    `Error: ${msg}`,
-    "",
-    "Start the backend with:",
-    "  llm-tracker serve",
-    "",
-    "Or run the daemon for continuous collection:",
-    "  llm-tracker daemon",
-  ].join("\n")
+  return `LLM Tracker: ${msg}. Run: llm-tracker serve`
 }
