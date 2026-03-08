@@ -31,6 +31,11 @@ load_dotenv()
 
 LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL", "").rstrip("/")
 LITELLM_API_KEY = os.getenv("LITELLM_API_KEY", "")
+FREE_TIER_PROVIDERS: set[str] = {
+    p.strip().lower()
+    for p in os.getenv("FREE_TIER_PROVIDERS", "").split(",")
+    if p.strip()
+}
 
 # Model-name prefix → provider
 # Patterns applied to the *canonical* model name (after stripping LiteLLM routing prefixes).
@@ -170,6 +175,9 @@ class LiteLLMCollector:
             else:
                 snapshot.api_spend_usd = 0.0
                 snapshot.raw = {"source": "litellm", "base_url": self._base}
+
+            if provider in FREE_TIER_PROVIDERS:
+                snapshot.api_spend_usd = 0.0
 
             snapshot.api_spend_period = "monthly"
             snapshot.tokens_period = "monthly"

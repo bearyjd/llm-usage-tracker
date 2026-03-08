@@ -51,22 +51,15 @@ class ClaudeCollector(BaseCollector):
         return super().has_session() or _read_claude_credentials() is not None
 
     async def collect(self) -> UsageSnapshot:
-        errors: list[str] = []
-
         if super().has_session():
-            try:
-                return await self._collect_via_http()
-            except Exception as e:
-                errors.append(f"http: {e}")
+            return await self._collect_via_http()
 
-        try:
+        creds = _read_claude_credentials()
+        if creds:
             return self._collect_from_credentials()
-        except Exception as e:
-            errors.append(f"credentials: {e}")
 
         raise CollectionError(
-            f"All Claude collection methods failed: {'; '.join(errors)}. "
-            "Run: llm-tracker auth claude"
+            "No Claude session or credentials found. Run: llm-tracker auth claude"
         )
 
     async def _collect_via_http(self) -> UsageSnapshot:
