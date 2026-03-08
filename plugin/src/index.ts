@@ -87,16 +87,25 @@ export const LLMUsagePlugin: Plugin = async ({ client, $ }) => {
   }
 
   async function ensureBackend(): Promise<boolean> {
-    if (await tracker.isAlive()) return true
+    try {
+      if (await tracker.isAlive()) return true
+    } catch {
+      // Network error during health check — backend is down
+    }
     if (backendStarted) return false
 
     backendStarted = true
     await log("info", "Backend not reachable, attempting auto-start")
     try {
-      $`llm-tracker serve &`.quiet()
+      $`llm-tracker serve > /dev/null 2>&1 &`.quiet().nothrow()
       // Give it a moment to bind the port
-      await new Promise((r) => setTimeout(r, 2000))
-      const alive = await tracker.isAlive()
+      await new Promise((r) => setTimeout(r, 3000))
+      let alive = false
+      try {
+        alive = await tracker.isAlive()
+      } catch {
+        // ignore
+      }
       if (alive) {
         await log("info", "Backend auto-started successfully", { url: config.backendUrl })
       } else {
@@ -111,7 +120,8 @@ export const LLMUsagePlugin: Plugin = async ({ client, $ }) => {
     }
   }
 
-  void ensureBackend()
+  // Defer startup check so it doesn't interfere with OpenCode's TUI initialization
+  setTimeout(() => { void ensureBackend() }, 5000)
 
   return {
     event: async ({ event }) => {
