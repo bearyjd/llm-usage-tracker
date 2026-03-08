@@ -6,25 +6,61 @@ Track subscription limits and API spend across Claude, ChatGPT, Gemini, and Groq
 
 - **Multi-provider tracking** -- Claude, ChatGPT, Gemini, Groq subscription limits and API spend in one place
 - **Smart recommendations** -- rule-based engine ranks providers by available headroom, reset timing, and cost
-- **OpenCode integration** -- inline usage summary after every AI response, slash commands, and an `llm_usage` tool the AI can call
+- **OpenCode integration** -- toast notifications after every AI response, slash commands, and an `llm_usage` tool the AI can call
 - **LiteLLM support** -- single integration point for API spend tracking across all providers, with automatic model-to-provider attribution (handles routing prefixes like `openai/claude-opus`)
 - **Cloudflare-safe auth** -- dedicated persistent browser profiles per provider so session cookies survive across collection runs
 - **Background daemon** -- auto-refreshes data on a configurable interval
 - **REST API** -- FastAPI server backing the plugin, web UIs, and programmatic access
 - **SQLite storage** -- full usage history with snapshots for trend analysis
 
-## Quick Start
+## Install
+
+### CLI (required)
 
 ```bash
-# Install
-pip install -e .
+# From anywhere -- install as editable so updates are picked up automatically
+pip install -e /path/to/llm-usage-tracker
 
-# Install Playwright browsers
+# Install Playwright browsers (needed for ChatGPT/Gemini auth and collection)
 playwright install chromium
 
 # Copy and edit environment config
-cp .env.example .env
+cp /path/to/llm-usage-tracker/.env.example /path/to/llm-usage-tracker/.env
+```
 
+### OpenCode Plugin (optional)
+
+```bash
+# Install the plugin into OpenCode's config
+npm install --prefix ~/.config/opencode /path/to/llm-usage-tracker/plugin
+```
+
+Register it in `~/.config/opencode/opencode.json`:
+
+```json
+{
+  "plugin": ["opencode-llm-usage"]
+}
+```
+
+Restart OpenCode. The plugin auto-starts the backend if it detects the server is down.
+
+### Upgrading
+
+Both installs are local links -- after pulling new changes, just re-run the same commands:
+
+```bash
+pip install -e /path/to/llm-usage-tracker
+npm install --prefix ~/.config/opencode
+```
+
+### Distrobox / Shared Home
+
+Works across host and distrobox containers as long as they share the same home directory and Python version. The `pip install -e` and npm installs go into `~/.local/` and `~/.config/opencode/`, both of which are shared.
+
+## Quick Start
+
+```bash
 # Authenticate (opens a headed browser -- log in manually, press Enter when done)
 llm-tracker auth claude
 llm-tracker auth chatgpt
@@ -54,50 +90,23 @@ llm-tracker recommend
 
 ## OpenCode Plugin
 
-The plugin displays live LLM usage data inside OpenCode as you work. After each AI response, a compact usage summary is injected into the chat. Slash commands provide detailed reports, and the `llm_usage` tool lets the AI check usage programmatically.
-
-### Setup
-
-1. Start the backend:
-
-```bash
-llm-tracker serve
-# or for continuous collection:
-llm-tracker daemon
-```
-
-2. Install the plugin into OpenCode:
-
-```bash
-cd ~/.config/opencode
-npm install /path/to/llm-usage-tracker/plugin
-```
-
-3. Register it in `~/.config/opencode/opencode.json`:
-
-```json
-{
-  "plugin": ["opencode-llm-usage"]
-}
-```
-
-4. Restart OpenCode.
+The plugin displays live LLM usage data inside OpenCode via toast notifications. After each AI response, a compact usage summary appears as a toast. Slash commands provide detailed reports, and the `llm_usage` tool lets the AI check usage programmatically.
 
 ### What You See
 
-**After every AI response** (session.idle event), a one-liner is injected into the chat:
+**After every AI response** (session.idle event), a toast notification appears:
 
 ```
-✓ Claude: 93/100 left (4h 26m) | ✓ Groq: 100000/100000 left (1h 26m) | API: $8.93
+✓ Claude: 21/100 left (53m) | ✓ Groq: 100000/100000 left (7h 53m) | API: $37.00
 ```
 
-**Slash commands** for detailed reports:
+**Slash commands:**
 
 | Command | Description |
 |---------|-------------|
-| `/usage` | Full usage report -- subscription limits + API spend table |
-| `/spend` | API spend summary (last 30 days) |
-| `/recommend` | Which provider to use right now |
+| `/usage` | Subscription usage summary (toast) |
+| `/spend` | API spend summary, last 30 days (toast) |
+| `/recommend` | Which provider to use right now (toast) |
 | `/collect` | Trigger a fresh data collection |
 
 **AI-callable tool**: The `llm_usage` tool is available to the AI agent. It can call it with `detail: "summary"`, `"full"`, or `"recommend"` to check usage without you asking.
@@ -109,10 +118,10 @@ Environment variables to customize plugin behavior:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LLM_TRACKER_URL` | `http://127.0.0.1:48372` | Backend API URL |
-| `LLM_TRACKER_SHOW_ON_IDLE` | `true` | Inject usage after each AI response |
+| `LLM_TRACKER_SHOW_ON_IDLE` | `true` | Show toast after each AI response |
 | `LLM_TRACKER_SHOW_ON_COMPACT` | `true` | Show toast on session compaction |
 | `LLM_TRACKER_TOAST_DURATION` | `8000` | Toast display time (ms) |
-| `LLM_TRACKER_MIN_INTERVAL` | `30000` | Minimum time between usage injections (ms) |
+| `LLM_TRACKER_MIN_INTERVAL` | `30000` | Minimum time between toasts (ms) |
 | `LLM_TRACKER_TIMEOUT` | `5000` | Backend request timeout (ms) |
 
 ## How It Works
@@ -215,7 +224,7 @@ plugin/                      # OpenCode plugin (TypeScript)
 │   └── lib/
 │       ├── client.ts        # Backend API client (fetch with timeout)
 │       ├── config.ts        # Plugin config from env vars
-│       └── format.ts        # Inline, toast, report, and recommendation formatters
+│       └── format.ts        # Toast, report, and recommendation formatters
 └── package.json
 
 auth/
@@ -233,3 +242,4 @@ data/
 - The `data/`, `auth/sessions/`, and `auth/browser_profiles/` directories are gitignored.
 - The plugin auto-starts the backend if it detects the server is down.
 - Claude collection requires no browser for ongoing use -- only the initial auth needs a headed browser.
+- Claude usage is reported as a percentage of capacity (the API doesn't expose exact message counts).
