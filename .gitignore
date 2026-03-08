@@ -33,3 +33,5 @@ Thumbs.db
 # Plugin (TypeScript)
 plugin/node_modules/
 plugin/dist/
+plugin/auth/
+plugin/data/
