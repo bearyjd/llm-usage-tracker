@@ -12,17 +12,24 @@ from backend.db.models import Base
 
 load_dotenv()
 
-_DEFAULT_DB_PATH = Path(__file__).parent.parent.parent / "data" / "usage.db"
-_DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite+aiosqlite:///{_DEFAULT_DB_PATH}")
+_PROJECT_ROOT = Path(__file__).parent.parent.parent
+_DEFAULT_DB_PATH = _PROJECT_ROOT / "data" / "usage.db"
 
-# Ensure data directory exists
-_db_path = _DEFAULT_DB_PATH
-if "sqlite" in _DATABASE_URL:
-    # Extract path from URL for directory creation
-    _url_path = _DATABASE_URL.replace("sqlite+aiosqlite:///", "")
-    if not _url_path.startswith(":"):
-        _db_path = Path(_url_path)
-        _db_path.parent.mkdir(parents=True, exist_ok=True)
+
+def _resolve_db_url() -> str:
+    url = os.getenv("DATABASE_URL", f"sqlite+aiosqlite:///{_DEFAULT_DB_PATH}")
+    if "sqlite" in url:
+        raw_path = url.replace("sqlite+aiosqlite:///", "")
+        if not raw_path.startswith(":"):
+            db_path = Path(raw_path)
+            if not db_path.is_absolute():
+                db_path = _PROJECT_ROOT / db_path
+                url = f"sqlite+aiosqlite:///{db_path}"
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+    return url
+
+
+_DATABASE_URL = _resolve_db_url()
 
 engine = create_async_engine(
     _DATABASE_URL,

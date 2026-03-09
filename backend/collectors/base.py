@@ -19,10 +19,18 @@ from backend.db.models import UsageSnapshot
 load_dotenv()
 
 _PROJECT_ROOT = Path(__file__).parent.parent.parent
-SESSIONS_DIR = Path(os.getenv("SESSIONS_DIR", str(_PROJECT_ROOT / "auth" / "sessions")))
-BROWSER_PROFILES_DIR = Path(
-    os.getenv("BROWSER_PROFILES_DIR", str(_PROJECT_ROOT / "auth" / "browser_profiles"))
-)
+
+
+def _resolve_dir(env_key: str, default_subpath: str) -> Path:
+    val = os.getenv(env_key)
+    if not val:
+        return _PROJECT_ROOT / default_subpath
+    p = Path(val)
+    return p if p.is_absolute() else _PROJECT_ROOT / p
+
+
+SESSIONS_DIR = _resolve_dir("SESSIONS_DIR", "auth/sessions")
+BROWSER_PROFILES_DIR = _resolve_dir("BROWSER_PROFILES_DIR", "auth/browser_profiles")
 BROWSER_TYPE = os.getenv("PLAYWRIGHT_BROWSER", "chromium")
 HEADFUL = os.getenv("PLAYWRIGHT_HEADFUL", "0") == "1"
 
