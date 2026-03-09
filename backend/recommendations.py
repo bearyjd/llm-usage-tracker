@@ -59,57 +59,35 @@ def recommend(snapshots: list[UsageSnapshot]) -> list[Recommendation]:
         pct = snapshot.usage_pct
         remaining = snapshot.messages_remaining
         reset_min = snapshot.minutes_until_reset()
+        is_pct = _is_percentage_based(snapshot)
+        name = snapshot.provider.title()
 
         if pct is None:
-            # No usage data
             recs.append(
-                Recommendation(
-                    snapshot.provider,
-                    f"{snapshot.provider.title()}: usage data unavailable",
-                    priority=50,
-                    action="unknown",
-                )
+                Recommendation(snapshot.provider, f"{name}: usage data unavailable", priority=50, action="unknown")
             )
             continue
+
+        remaining_label = f"{100 - int(pct * 100)}% free" if is_pct else f"{remaining} messages left ({(1 - pct):.0%} free)"
 
         if pct >= CRITICAL_PCT:
             if reset_min is not None and reset_min <= WAIT_WINDOW_MIN:
                 recs.append(
-                    Recommendation(
-                        snapshot.provider,
-                        f"{snapshot.provider.title()} is nearly exhausted — resets in {_fmt_min(reset_min)}. Wait or switch.",
-                        priority=10,
-                        action="wait",
-                    )
+                    Recommendation(snapshot.provider, f"{name} is nearly exhausted — resets in {_fmt_min(reset_min)}. Wait or switch.", priority=10, action="wait")
                 )
             else:
                 recs.append(
-                    Recommendation(
-                        snapshot.provider,
-                        f"{snapshot.provider.title()} is at {pct:.0%} — avoid until reset.",
-                        priority=20,
-                        action="avoid",
-                    )
+                    Recommendation(snapshot.provider, f"{name} is at {pct:.0%} — avoid until reset.", priority=20, action="avoid")
                 )
         elif pct >= WARN_PCT:
             alt = _best_alternative(snapshot.provider, snapshots)
             alt_str = f" Consider {alt.title()}." if alt else ""
             recs.append(
-                Recommendation(
-                    snapshot.provider,
-                    f"{snapshot.provider.title()} is at {pct:.0%} ({remaining} left).{alt_str}",
-                    priority=30,
-                    action="warn",
-                )
+                Recommendation(snapshot.provider, f"{name} is at {pct:.0%} ({remaining_label}).{alt_str}", priority=30, action="warn")
             )
         else:
             recs.append(
-                Recommendation(
-                    snapshot.provider,
-                    f"{snapshot.provider.title()} has {remaining} messages left ({(1 - pct):.0%} free) — good to use.",
-                    priority=60 + int(pct * 10),
-                    action="use",
-                )
+                Recommendation(snapshot.provider, f"{name} has {remaining_label} — good to use.", priority=60 + int(pct * 10), action="use")
             )
 
     return sorted(recs, key=lambda r: r.priority)
@@ -134,6 +112,10 @@ def _fmt_min(minutes: float) -> str:
 # ------------------------------------------------------------------
 # Rich display
 # ------------------------------------------------------------------
+
+def _is_percentage_based(s: UsageSnapshot) -> bool:
+    return s.provider == "claude" and s.messages_limit == 100
+
 
 STATUS_ICONS = {
     "use": "[green]✓ Good[/green]",
@@ -177,9 +159,15 @@ def print_status_table(snapshots: list[UsageSnapshot]) -> None:
         sub_table.add_row("(no data)", "—", "—", "—", "—", "—", "[dim]run status[/dim]")
     else:
         for s in sorted(sub_snapshots, key=lambda x: x.provider):
-            used_str = str(s.messages_used) if s.messages_used is not None else "?"
-            limit_str = str(s.messages_limit) if s.messages_limit is not None else "?"
-            remaining_str = str(s.messages_remaining) if s.messages_remaining is not None else "?"
+            is_pct = _is_percentage_based(s)
+            if is_pct and s.messages_used is not None:
+                used_str = f"{s.messages_used}%"
+                limit_str = "—"
+                remaining_str = f"{100 - s.messages_used}%"
+            else:
+                used_str = str(s.messages_used) if s.messages_used is not None else "?"
+                limit_str = str(s.messages_limit) if s.messages_limit is not None else "?"
+                remaining_str = str(s.messages_remaining) if s.messages_remaining is not None else "?"
             window_str = f"{s.messages_window_hours:.0f}h" if s.messages_window_hours else "?"
             reset_str = _fmt_min(s.minutes_until_reset()) if s.minutes_until_reset() is not None else "?"
 

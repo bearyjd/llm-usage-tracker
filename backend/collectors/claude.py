@@ -119,40 +119,48 @@ class ClaudeCollector(BaseCollector):
         five_hour = data.get("five_hour_utilization") or data.get("five_hour") or {}
         seven_day = data.get("seven_day_utilization") or data.get("seven_day") or {}
 
-        if five_hour:
-            if "messages_sent" in five_hour:
-                snapshot.messages_used = five_hour["messages_sent"]
-                snapshot.messages_limit = five_hour.get("messages_limit")
-            elif "utilization" in five_hour:
-                snapshot.messages_used = int(five_hour["utilization"])
-                snapshot.messages_limit = 100
-            snapshot.messages_window_hours = 5.0
-            reset_at_str = five_hour.get("resets_at") or five_hour.get("reset_at") or data.get("reset_at")
+        # Claude API returns utilization as a percentage (0–100), not message counts.
+        # We pick the more restrictive window (higher utilization) to surface the
+        # tightest constraint. Stored as messages_used=pct, messages_limit=100.
+        best_window = None
+        best_pct = -1.0
+
+        for window_data, hours in [(five_hour, 5.0), (seven_day, 168.0)]:
+            if not window_data:
+                continue
+            pct = None
+            if "messages_sent" in window_data and "messages_limit" in window_data:
+                sent = window_data["messages_sent"]
+                limit = window_data["messages_limit"]
+                if limit and limit > 0:
+                    pct = round(sent / limit * 100)
+            elif "utilization" in window_data:
+                pct = round(float(window_data["utilization"]))
+
+            if pct is not None and pct > best_pct:
+                best_pct = pct
+                reset_at_str = window_data.get("resets_at") or window_data.get("reset_at") or data.get("reset_at")
+                best_window = (pct, hours, reset_at_str)
+
+        if best_window:
+            pct, hours, reset_at_str = best_window
+            snapshot.messages_used = pct
+            snapshot.messages_limit = 100
+            snapshot.messages_window_hours = hours
             if reset_at_str:
                 snapshot.messages_reset_at = _parse_iso(reset_at_str)
-
-        if seven_day:
-            seven_day_pct = None
-            if "messages_sent" in seven_day:
-                seven_day_pct = seven_day.get("messages_sent")
-            elif "utilization" in seven_day:
-                seven_day_pct = int(seven_day["utilization"])
-
-            if not five_hour and seven_day_pct is not None:
-                snapshot.messages_used = seven_day_pct
-                snapshot.messages_limit = seven_day.get("messages_limit", 100)
-                snapshot.messages_window_hours = 168.0
-                reset_at_str = seven_day.get("resets_at") or seven_day.get("reset_at") or data.get("reset_at")
-                if reset_at_str:
-                    snapshot.messages_reset_at = _parse_iso(reset_at_str)
 
         snapshot.model_tier = data.get("plan_name") or data.get("subscription_tier")
 
         features: dict = {}
-        for key in ("models_available", "context_window", "priority_access",
-                     "extra_usage", "seven_day_sonnet", "seven_day_opus"):
-            if key in data and data[key] is not None:
-                features[key] = data[key]
+        for window_key in ("five_hour", "seven_day", "seven_day_sonnet", "seven_day_opus",
+                           "seven_day_cowork", "seven_day_oauth_apps"):
+            window = data.get(window_key)
+            if window and isinstance(window, dict) and "utilization" in window:
+                features[window_key] = window
+        extra = data.get("extra_usage")
+        if extra and isinstance(extra, dict):
+            features["extra_usage"] = extra
         if features:
             snapshot.features = features
 

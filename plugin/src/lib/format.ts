@@ -41,6 +41,10 @@ function statusIcon(pctUsed: number): string {
   return "\u2713" // ✓
 }
 
+function isPercentageBased(s: Snapshot): boolean {
+  return s.provider === "claude" && s.messages_limit === 100
+}
+
 function providerName(p: string): string {
   const names: Record<string, string> = {
     claude: "Claude",
@@ -64,9 +68,13 @@ export function formatInline(snapshots: Snapshot[]): string {
   for (const s of sub) {
     if (s.messages_used !== null && s.messages_limit !== null) {
       const p = pct(s.messages_used, s.messages_limit)
-      const remaining = s.messages_limit - s.messages_used
       const reset = fmtMinutes(s.messages_reset_at)
-      parts.push(`${statusIcon(p)} ${providerName(s.provider)}: ${remaining}/${s.messages_limit} left (${reset})`)
+      if (isPercentageBased(s)) {
+        parts.push(`${statusIcon(p)} ${providerName(s.provider)}: ${100 - p}% free (${reset})`)
+      } else {
+        const remaining = s.messages_limit - s.messages_used
+        parts.push(`${statusIcon(p)} ${providerName(s.provider)}: ${remaining}/${s.messages_limit} left (${reset})`)
+      }
     }
   }
 
@@ -92,9 +100,13 @@ export function formatToast(snapshots: Snapshot[]): string {
   for (const s of sub) {
     if (s.messages_used !== null && s.messages_limit !== null) {
       const p = pct(s.messages_used, s.messages_limit)
-      const remaining = s.messages_limit - s.messages_used
       const reset = fmtMinutes(s.messages_reset_at)
-      lines.push(`${statusIcon(p)} ${providerName(s.provider)}: ${remaining} left (${p}%) resets ${reset}`)
+      if (isPercentageBased(s)) {
+        lines.push(`${statusIcon(p)} ${providerName(s.provider)}: ${100 - p}% free resets ${reset}`)
+      } else {
+        const remaining = s.messages_limit - s.messages_used
+        lines.push(`${statusIcon(p)} ${providerName(s.provider)}: ${remaining} left (${p}%) resets ${reset}`)
+      }
     }
   }
 
@@ -125,19 +137,27 @@ export function formatUsageReport(snapshots: Snapshot[]): string {
     lines.push("Provider     Used   Limit   Left    %Used  Resets   Tier")
     lines.push("-".repeat(65))
     for (const s of sub.sort((a, b) => a.provider.localeCompare(b.provider))) {
-      const used = s.messages_used ?? "?"
-      const limit = s.messages_limit ?? "?"
-      const left = s.messages_used !== null && s.messages_limit !== null
-        ? String(s.messages_limit - s.messages_used)
-        : "?"
-      const p = s.messages_used !== null && s.messages_limit !== null
-        ? `${pct(s.messages_used, s.messages_limit)}%`
-        : "?"
+      let used: string, limit: string, left: string, p: string
+      if (isPercentageBased(s) && s.messages_used !== null) {
+        used = `${s.messages_used}%`
+        limit = "—"
+        left = `${100 - s.messages_used}%`
+        p = `${s.messages_used}%`
+      } else {
+        used = s.messages_used !== null ? String(s.messages_used) : "?"
+        limit = s.messages_limit !== null ? String(s.messages_limit) : "?"
+        left = s.messages_used !== null && s.messages_limit !== null
+          ? String(s.messages_limit - s.messages_used)
+          : "?"
+        p = s.messages_used !== null && s.messages_limit !== null
+          ? `${pct(s.messages_used, s.messages_limit)}%`
+          : "?"
+      }
       const reset = fmtMinutes(s.messages_reset_at)
       const tier = s.model_tier ?? "?"
       const name = providerName(s.provider).padEnd(12)
       lines.push(
-        `${name} ${String(used).padStart(5)}  ${String(limit).padStart(6)}  ${left.padStart(5)}  ${p.padStart(6)}  ${reset.padStart(7)}   ${tier}`,
+        `${name} ${used.padStart(5)}  ${limit.padStart(6)}  ${left.padStart(5)}  ${p.padStart(6)}  ${reset.padStart(7)}   ${tier}`,
       )
     }
     lines.push("")
