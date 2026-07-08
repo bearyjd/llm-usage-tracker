@@ -1,0 +1,21 @@
+{
+  "five_hour_utilization": {
+    "utilization": 45,
+    "resets_at": "2026-07-07T18:00:00Z"
+  },
+  "seven_day_utilization": {
+    "utilization": 62,
+    "resets_at": "2026-07-10T00:00:00Z"
+  },
+  "seven_day_sonnet": {
+    "utilization": 30
+  },
+  "seven_day_opus": {
+    "utilization": 62
+  },
+  "extra_usage": {
+    "enabled": false
+  },
+  "plan_name": "Max",
+  "subscription_tier": "max"
+}

@@ -1,0 +1,7 @@
+{
+  "five_hour_utilization": {
+    "messages_sent": 42,
+    "messages_limit": 60
+  },
+  "plan_name": "Pro"
+}
