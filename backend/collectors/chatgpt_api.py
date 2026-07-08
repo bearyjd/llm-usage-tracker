@@ -10,8 +10,7 @@ Auth: llm-tracker auth chatgpt --api
 from __future__ import annotations
 
 import os
-import re
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 import httpx
 from dotenv import load_dotenv

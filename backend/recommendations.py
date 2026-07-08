@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 
 from rich.console import Console
-from rich.panel import Panel
 from rich.table import Table
 from rich import box
 

@@ -7,9 +7,7 @@ Fallback: Playwright DOM scrape of chat.openai.com
 
 from __future__ import annotations
 
-import os
 import re
-from datetime import datetime
 
 from playwright.async_api import async_playwright
 

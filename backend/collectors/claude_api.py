@@ -10,7 +10,6 @@ Auth: llm-tracker auth claude --api
 from __future__ import annotations
 
 import re
-from datetime import datetime
 
 from playwright.async_api import async_playwright
 
